@@ -22,8 +22,9 @@ services:
     container_name: weather-producer
     depends_on:
       - kafka
+    volumes:
+      - ./credentials:/opt/credentials:ro
     environment:
-      OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY}
       WEATHER_LAT: ${WEATHER_LAT:-21.03}
       WEATHER_LON: ${WEATHER_LON:-105.77}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -38,8 +39,9 @@ services:
     command: ["python", "-u", "produce_airpollution.py"]
     depends_on:
       - kafka
+    volumes:
+      - ./credentials:/opt/credentials:ro
     environment:
-      OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY}
       WEATHER_LAT: ${WEATHER_LAT:-21.03}
       WEATHER_LON: ${WEATHER_LON:-105.77}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092

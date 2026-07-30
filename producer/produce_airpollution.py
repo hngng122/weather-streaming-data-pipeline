@@ -7,7 +7,7 @@ import time
 import requests
 from kafka import KafkaProducer
 
-API_KEY = os.environ["OPENWEATHERMAP_API_KEY"]
+API_KEY = open("/opt/credentials/openweathermap_api_key.txt").read().strip()
 LAT = os.environ["WEATHER_LAT"]
 LON = os.environ["WEATHER_LON"]
 KAFKA_BOOTSTRAP_SERVERS = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
