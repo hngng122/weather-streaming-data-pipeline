@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+credentials/
+
+# Spark runtime state / downloaded deps — environment-specific, not source
+spark_jobs/checkpoints/
+spark_jobs/jars/
+
+# Airflow runtime state / secrets / auto-generated config
+airflow/logs/
+airflow/airflow.db
+airflow/airflow-webserver.pid
+airflow/standalone_admin_password.txt
+airflow/webserver_config.py
+airflow/airflow.cfg

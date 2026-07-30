@@ -1,0 +1,120 @@
+services:
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: kafka
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  producer:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    container_name: weather-producer
+    depends_on:
+      - kafka
+    environment:
+      OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY}
+      WEATHER_LAT: ${WEATHER_LAT:-21.03}
+      WEATHER_LON: ${WEATHER_LON:-105.77}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: weather-events
+      POLL_INTERVAL_SECONDS: 900
+
+  producer-airpollution:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    container_name: airpollution-producer
+    command: ["python", "-u", "produce_airpollution.py"]
+    depends_on:
+      - kafka
+    environment:
+      OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY}
+      WEATHER_LAT: ${WEATHER_LAT:-21.03}
+      WEATHER_LON: ${WEATHER_LON:-105.77}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: air-pollution-events
+      POLL_INTERVAL_SECONDS: 900
+
+  spark:
+    image: apache/spark-py:v3.4.0
+    container_name: spark-consumer
+    user: root
+    depends_on:
+      - kafka
+    ports:
+      - "4040:4040"
+    volumes:
+      - ./spark_jobs:/opt/spark_jobs
+      - ./credentials:/opt/credentials:ro
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      WEATHER_TOPIC: weather-events
+      AIRPOLLUTION_TOPIC: air-pollution-events
+      GCS_BUCKET: private-bucket-102
+    command: >
+      /opt/spark/bin/spark-submit
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.0
+      --jars /opt/spark_jobs/jars/gcs-connector-hadoop3-latest.jar
+      --conf spark.hadoop.fs.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem
+      --conf spark.hadoop.fs.AbstractFileSystem.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFS
+      --conf spark.hadoop.google.cloud.auth.service.account.enable=true
+      --conf spark.hadoop.google.cloud.auth.service.account.json.keyfile=/opt/credentials/weather-pipeline-spark-key.json
+      /opt/spark_jobs/consume_events.py
+
+  spark-transform:
+    image: apache/spark-py:v3.4.0
+    container_name: spark-transform
+    user: root
+    ports:
+      - "4041:4040"
+    volumes:
+      - ./spark_jobs:/opt/spark_jobs
+      - ./credentials:/opt/credentials:ro
+    environment:
+      GCS_BUCKET: private-bucket-102
+      CUTOFF_TIMESTAMP: "2026-07-30T06:38:53"
+    command: >
+      /opt/spark/bin/spark-submit
+      --jars /opt/spark_jobs/jars/gcs-connector-hadoop3-latest.jar
+      --conf spark.hadoop.fs.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem
+      --conf spark.hadoop.fs.AbstractFileSystem.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFS
+      --conf spark.hadoop.google.cloud.auth.service.account.enable=true
+      --conf spark.hadoop.google.cloud.auth.service.account.json.keyfile=/opt/credentials/weather-pipeline-spark-key.json
+      /opt/spark_jobs/transform_events.py
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: weather-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+
+  airflow:
+    build:
+      context: ./airflow
+    container_name: airflow
+    user: "0:0"
+    ports:
+      - "8081:8080"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow:/opt/airflow
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: standalone
