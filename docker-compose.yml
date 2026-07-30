@@ -125,8 +125,13 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      GCS_BUCKET: ${GCS_BUCKET}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/credentials/gcs-service-account-key.json
     volumes:
       - ./airflow:/opt/airflow
+      - ./scripts:/opt/airflow/scripts:ro
+      - ./credentials:/opt/credentials:ro
       - /var/run/docker.sock:/var/run/docker.sock
     command: standalone
 
