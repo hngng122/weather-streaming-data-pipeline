@@ -2,8 +2,11 @@ services:
   kafka:
     image: apache/kafka:3.8.0
     container_name: kafka
+    restart: unless-stopped
     ports:
       - "29092:29092"
+    volumes:
+      - kafka_data:/tmp/kraft-combined-logs
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -20,6 +23,7 @@ services:
       context: .
       dockerfile: producer/Dockerfile
     container_name: weather-producer
+    restart: unless-stopped
     depends_on:
       - kafka
     volumes:
@@ -36,6 +40,7 @@ services:
       context: .
       dockerfile: producer/Dockerfile
     container_name: airpollution-producer
+    restart: unless-stopped
     command: ["python", "-u", "produce_airpollution.py"]
     depends_on:
       - kafka
@@ -52,6 +57,7 @@ services:
     image: apache/spark-py:v3.4.0
     container_name: spark-consumer
     user: root
+    restart: unless-stopped
     depends_on:
       - kafka
     ports:
@@ -78,6 +84,7 @@ services:
     image: apache/spark-py:v3.4.0
     container_name: spark-transform
     user: root
+    restart: unless-stopped
     ports:
       - "4041:4040"
     volumes:
@@ -98,6 +105,7 @@ services:
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui
+    restart: unless-stopped
     depends_on:
       - kafka
     ports:
@@ -111,6 +119,7 @@ services:
       context: ./airflow
     container_name: airflow
     user: "0:0"
+    restart: unless-stopped
     ports:
       - "8081:8080"
     environment:
@@ -120,3 +129,6 @@ services:
       - ./airflow:/opt/airflow
       - /var/run/docker.sock:/var/run/docker.sock
     command: standalone
+
+volumes:
+  kafka_data:

@@ -16,10 +16,17 @@ fi
 
 bq mk --dataset --location=US "${GCP_PROJECT_ID}:silver" 2>/dev/null || echo "Dataset silver already exists, skipping."
 
-bq mk --external_table_definition="PARQUET=gs://${GCS_BUCKET}/silver/weather/*.parquet" \
-  "${GCP_PROJECT_ID}:silver.weather_data"
+create_or_update_external_table() {
+  local table="$1"
+  local definition="$2"
+  if bq show --format=none "${GCP_PROJECT_ID}:silver.${table}" >/dev/null 2>&1; then
+    bq update --external_table_definition="${definition}" "${GCP_PROJECT_ID}:silver.${table}"
+  else
+    bq mk --external_table_definition="${definition}" "${GCP_PROJECT_ID}:silver.${table}"
+  fi
+}
 
-bq mk --external_table_definition="PARQUET=gs://${GCS_BUCKET}/silver/air-pollution/*.parquet" \
-  "${GCP_PROJECT_ID}:silver.air_pollution_data"
+create_or_update_external_table weather_data "PARQUET=gs://${GCS_BUCKET}/silver/weather/*.parquet"
+create_or_update_external_table air_pollution_data "PARQUET=gs://${GCS_BUCKET}/silver/air-pollution/*.parquet"
 
 echo "Done. Query with: bq query --use_legacy_sql=false 'SELECT * FROM \`${GCP_PROJECT_ID}.silver.weather_data\` LIMIT 10'"
