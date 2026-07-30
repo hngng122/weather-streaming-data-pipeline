@@ -1,6 +1,6 @@
 # Weather Data Pipeline
 
-A personal learning project for practicing streaming data engineering: two producers publish weather and air-quality readings to Kafka, Spark Structured Streaming ingests and transforms them into a GCS-based bronze/silver medallion layout, BigQuery exposes the silver layer as queryable external tables, and Airflow supervises the two long-running Spark jobs.
+A personal learning project for practicing streaming data engineering: two producers publish weather and air-quality readings to Kafka, Spark Structured Streaming ingests and transforms them into a GCS-based bronze/silver medallion layout, BigQuery exposes the silver layer as queryable external tables, and Airflow verifies data is actually flowing end-to-end.
 
 ## Architecture
 
@@ -29,8 +29,10 @@ OpenWeatherMap air-pollution API   ──▶ produce_airpollution.py ┘
                                                               ▼
                                                        SQL queries (bq / console)
 
-Airflow (spark_health_check DAG, every 10 min) supervises consume_events.py and
-transform_events.py, restarting either container if it's found stopped.
+Airflow (pipeline_health_check DAG, every 15 min) verifies each stage above
+actually moved data recently -- producers, Kafka offsets, bronze/silver GCS
+freshness -- run as four dependent tasks in pipeline order. Detection only,
+no auto-restart.
 ```
 
 ## Components
@@ -50,7 +52,9 @@ Each polls its API every `POLL_INTERVAL_SECONDS` (currently 900s / 15 min), publ
 
 Single-broker KRaft-mode cluster (`apache/kafka:3.8.0`, no Zookeeper), with dual listeners: `kafka:9092` for other containers, `localhost:29092` for host access. Two topics, default retention (`cleanup.policy=delete`, `retention.ms=604800000` — 7 days), kept deliberately at this default rather than tuned. **`kafka-ui`** (port 8080) gives a browser view of topics/messages for inspection.
 
-**Retention decision:** the risk retention protects against here is the whole laptop/Docker stack being off for a stretch (Airflow's health-check only restarts a crashed *container* while Docker keeps running — it can't help if the host itself is down). Message volume is tiny (2 topics, one message each per 15 min), so retention length costs almost nothing in disk regardless of value. 7 days already covers a full week of downtime, comfortably more than a realistic gap for this project, so it was kept as-is rather than tuned.
+Log directory (`/tmp/kraft-combined-logs`) is backed by a named Docker volume (`kafka_data`) — added after a container recreate once wiped the topic log entirely (nothing was mounted there before). A recreate can no longer lose Kafka's data.
+
+**Retention decision:** the risk retention protects against is the whole laptop/Docker stack being off for a stretch — every service has `restart: unless-stopped`, which recovers from a crashed container or a host reboot automatically, but not from the host being powered off for an extended period. Message volume is tiny (2 topics, one message each per 15 min), so retention length costs almost nothing in disk regardless of value. 7 days already covers a full week of downtime, comfortably more than a realistic gap for this project, so it was kept as-is rather than tuned.
 
 ### 3. Bronze layer — `spark_jobs/consume_events.py`
 
@@ -122,11 +126,20 @@ Two separate tables (not one combined wide table) by design — no column-prefix
 
 Pure SQL query engine, no data actually stored in BigQuery — `silver.weather_data` and `silver.air_pollution_data` are **external tables** defined directly over the GCS Parquet files. Created via `scripts/setup_bigquery.sh` (reads `GCP_PROJECT_ID`/`GCS_BUCKET` from `.env`), not by hand — see [README.md](README.md#querying). Querying them reads straight from GCS at query time (schema-on-read); no separate load/ETL step into BigQuery storage.
 
-### 6. Airflow — operational supervision
+### 6. Airflow — end-to-end health checks
 
-Airflow runs in standalone mode (single container, SQLite metadata DB — appropriate for a personal project, not production) with one DAG: `spark_health_check` (`airflow/dags/spark_health_check.py`), scheduled every 10 minutes.
+Airflow runs in standalone mode (single container, SQLite metadata DB — appropriate for a personal project, not production) with one DAG: `pipeline_health_check` (`airflow/dags/pipeline_health_check.py`), scheduled every 15 minutes.
 
-It does **not** orchestrate the streaming logic itself — `consume_events.py` and `transform_events.py` are long-running streaming queries that run continuously on their own via `docker-compose up`, with no scheduler needed for them to function. Airflow's job is purely supervisory: each run checks whether the `spark-consumer` and `spark-transform` containers are `running` via the Docker SDK (container access via a mounted `/var/run/docker.sock`), and restarts either one it finds stopped. Because both jobs resume from their own checkpoints, a restart never reprocesses or duplicates data.
+It does **not** orchestrate the streaming logic itself — `consume_events.py` and `transform_events.py` are long-running streaming queries that run continuously on their own via `docker-compose up`, with no scheduler needed for them to function. Airflow's job is verification: four tasks, chained in pipeline order (`check_producers >> check_kafka >> check_bronze >> check_silver`), each running `scripts/check_pipeline_health.py --stage <name>` inside the Airflow container. A failure at any stage blocks the tasks after it, so the Airflow UI points at exactly where the pipeline broke.
+
+Each stage checks that data is *actually moving*, not just that a container is up or a checkpoint claims to be caught up:
+- **producers** — container running + a `"Published ..."` log line within the last 30 minutes (2× the poll interval)
+- **kafka** — broker reachable, both topics exist, latest offset > 0
+- **bronze** / **silver** — container running + the most recent `.parquet` file's GCS timestamp is within 30 minutes
+
+That last check is deliberate: a Spark checkpoint can report itself fully caught up while silently writing nothing (this happened for real this session — a stale `_spark_metadata` sink log caused `consume_events.py` to skip every batch without erroring). Checking actual GCS output timestamps is the only way to catch that class of failure.
+
+This is **detection only** — no auto-remediation. A failed task surfaces in the Airflow UI; some of the failure modes this catches (like the `_spark_metadata` desync above) need a scoped, verified manual fix rather than a blind retry. `scripts/check_pipeline_health.py` is also runnable standalone (`python scripts/check_pipeline_health.py`, or `--stage <name>` for one stage) outside of Airflow.
 
 UI: `localhost:8081`. DAGs are paused by default when first deployed — must be explicitly unpaused for the schedule to run.
 
@@ -146,7 +159,7 @@ Gotcha hit along the way: `.option("modifiedAfter", ...)` — the natural way to
 docker compose up -d              # everything except initial_load.py (which is one-off, see below)
 ```
 
-Services: `kafka`, `producer`, `producer-airpollution`, `spark` (bronze), `spark-transform` (silver), `kafka-ui` (:8080), `airflow` (:8081).
+Services: `kafka`, `producer`, `producer-airpollution`, `spark` (bronze), `spark-transform` (silver), `kafka-ui` (:8080), `airflow` (:8081). Every service has `restart: unless-stopped`, so a crashed container or a host reboot recovers automatically without manual intervention.
 
 `initial_load.py` is intentionally **not** a compose service — run it manually, once, after bronze has some data and before starting `spark-transform` for the first time (or after any bronze checkpoint reset). Export `.env` into your shell first so `GCS_BUCKET` is available to `docker run`:
 

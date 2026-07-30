@@ -1,6 +1,6 @@
 # weather-streaming-data-pipeline
 
-A personal learning project for practicing streaming data engineering: Kafka → Spark Structured Streaming → GCS (bronze/silver) → BigQuery, supervised by Airflow.
+A personal learning project for practicing streaming data engineering: Kafka → Spark Structured Streaming → GCS (bronze/silver) → BigQuery, with Airflow verifying data actually flows end-to-end.
 
 See [PIPELINE.md](PIPELINE.md) for the full architecture, schemas, and design decisions.
 
@@ -39,7 +39,7 @@ This starts:
 | `producer`, `producer-airpollution` | Poll OpenWeatherMap, publish to Kafka | — |
 | `spark` (bronze) | Kafka → raw Parquet in GCS | http://localhost:4040 |
 | `spark-transform` (silver) | Bronze → typed Parquet in GCS | http://localhost:4041 |
-| `airflow` | Health-checks and restarts the two Spark containers | http://localhost:8081 |
+| `airflow` | Verifies producers/Kafka/bronze/silver are actually moving data | http://localhost:8081 |
 
 **One-time only**, before starting `spark-transform` for the first time (or after any bronze checkpoint reset): run `initial_load.py` to backfill and deduplicate bronze into silver. See the "Running it" section in [PIPELINE.md](PIPELINE.md) for the exact command, then set `CUTOFF_TIMESTAMP` in `docker-compose.yml` to the UTC time it finished.
 
