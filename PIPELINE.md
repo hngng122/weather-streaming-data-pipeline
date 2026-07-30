@@ -120,7 +120,7 @@ Two separate tables (not one combined wide table) by design — no column-prefix
 
 ### 5. BigQuery
 
-Pure SQL query engine, no data actually stored in BigQuery — `silver.weather_data` and `silver.air_pollution_data` are **external tables** defined directly over the GCS Parquet files (`bq mk --external_table_definition='PARQUET=gs://<bucket>/silver/weather/*.parquet' silver.weather_data`, and the same for air pollution). Querying them reads straight from GCS at query time (schema-on-read); no separate load/ETL step into BigQuery storage.
+Pure SQL query engine, no data actually stored in BigQuery — `silver.weather_data` and `silver.air_pollution_data` are **external tables** defined directly over the GCS Parquet files. Created via `scripts/setup_bigquery.sh` (reads `GCP_PROJECT_ID`/`GCS_BUCKET` from `.env`), not by hand — see [README.md](README.md#querying). Querying them reads straight from GCS at query time (schema-on-read); no separate load/ETL step into BigQuery storage.
 
 ### 6. Airflow — operational supervision
 
@@ -148,19 +148,24 @@ docker compose up -d              # everything except initial_load.py (which is 
 
 Services: `kafka`, `producer`, `producer-airpollution`, `spark` (bronze), `spark-transform` (silver), `kafka-ui` (:8080), `airflow` (:8081).
 
-`initial_load.py` is intentionally **not** a compose service — run it manually, once, after bronze has some data and before starting `spark-transform` for the first time (or after any bronze checkpoint reset):
+`initial_load.py` is intentionally **not** a compose service — run it manually, once, after bronze has some data and before starting `spark-transform` for the first time (or after any bronze checkpoint reset). Export `.env` into your shell first so `GCS_BUCKET` is available to `docker run`:
+
+```bash
+set -a && source .env && set +a
+```
 
 ```bash
 docker run --rm --user root \
   -v "$(pwd)/spark_jobs:/opt/spark_jobs" \
   -v "$(pwd)/credentials:/opt/credentials:ro" \
+  -e GCS_BUCKET \
   apache/spark-py:v3.4.0 \
   /opt/spark/bin/spark-submit \
   --jars /opt/spark_jobs/jars/gcs-connector-hadoop3-latest.jar \
   --conf spark.hadoop.fs.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem \
   --conf spark.hadoop.fs.AbstractFileSystem.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFS \
   --conf spark.hadoop.google.cloud.auth.service.account.enable=true \
-  --conf spark.hadoop.google.cloud.auth.service.account.json.keyfile=/opt/credentials/weather-pipeline-spark-key.json \
+  --conf spark.hadoop.google.cloud.auth.service.account.json.keyfile=/opt/credentials/gcs-service-account-key.json \
   /opt/spark_jobs/initial_load.py
 ```
 

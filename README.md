@@ -7,19 +7,22 @@ See [PIPELINE.md](PIPELINE.md) for the full architecture, schemas, and design de
 ## Prerequisites
 
 - Docker and Docker Compose
-- A GCS bucket, with a service account key granting `roles/storage.objectAdmin` on that bucket, saved at `credentials/weather-pipeline-spark-key.json`
+- A GCP project with a GCS bucket, and a service account key granting `roles/storage.objectAdmin` on that bucket, saved at `credentials/gcs-service-account-key.json`
 - An OpenWeatherMap API key, saved at `credentials/openweathermap_api_key.txt` (plain text, key only)
+- The `bq` CLI (part of the Google Cloud SDK), authenticated against your GCP project, if you want the BigQuery querying layer
 
 All credentials live under `credentials/` (gitignored) — mounted read-only into whichever container needs them, rather than passed as environment variables.
 
 ## Setup
 
-1. Copy `.env.example` to `.env` — this holds non-secret config (lat/lon):
+1. Copy `.env.example` to `.env` and fill in your own values:
    ```bash
    cp .env.example .env
    ```
-2. Create `credentials/openweathermap_api_key.txt` containing your OpenWeatherMap API key, and `credentials/weather-pipeline-spark-key.json` with your GCS service account key.
-3. Update `GCS_BUCKET` in `docker-compose.yml` (both `spark` and `spark-transform` services) to your bucket name.
+   - `GCP_PROJECT_ID` — your GCP project ID
+   - `GCS_BUCKET` — your GCS bucket name
+   - `WEATHER_LAT` / `WEATHER_LON` — the coordinates you want to track (no default — the pipeline won't start without these set)
+2. Create `credentials/openweathermap_api_key.txt` containing your OpenWeatherMap API key, and `credentials/gcs-service-account-key.json` with your GCS service account key.
 
 ## Running
 
@@ -42,8 +45,14 @@ This starts:
 
 ## Querying
 
-Once silver data exists in GCS, create BigQuery external tables over it (see [PIPELINE.md](PIPELINE.md#5-bigquery)), then query with:
+Once silver data exists in GCS, create the BigQuery dataset and external tables:
 
 ```bash
-bq query --use_legacy_sql=false 'SELECT * FROM `<project>.silver.weather_data` LIMIT 10'
+./scripts/setup_bigquery.sh
+```
+
+Then query with:
+
+```bash
+bq query --use_legacy_sql=false 'SELECT * FROM `'"$GCP_PROJECT_ID"'.silver.weather_data` LIMIT 10'
 ```

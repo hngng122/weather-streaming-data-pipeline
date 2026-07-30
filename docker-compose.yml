@@ -25,8 +25,8 @@ services:
     volumes:
       - ./credentials:/opt/credentials:ro
     environment:
-      WEATHER_LAT: ${WEATHER_LAT:-21.03}
-      WEATHER_LON: ${WEATHER_LON:-105.77}
+      WEATHER_LAT: ${WEATHER_LAT}
+      WEATHER_LON: ${WEATHER_LON}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: weather-events
       POLL_INTERVAL_SECONDS: 900
@@ -42,8 +42,8 @@ services:
     volumes:
       - ./credentials:/opt/credentials:ro
     environment:
-      WEATHER_LAT: ${WEATHER_LAT:-21.03}
-      WEATHER_LON: ${WEATHER_LON:-105.77}
+      WEATHER_LAT: ${WEATHER_LAT}
+      WEATHER_LON: ${WEATHER_LON}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: air-pollution-events
       POLL_INTERVAL_SECONDS: 900
@@ -63,7 +63,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       WEATHER_TOPIC: weather-events
       AIRPOLLUTION_TOPIC: air-pollution-events
-      GCS_BUCKET: private-bucket-102
+      GCS_BUCKET: ${GCS_BUCKET}
     command: >
       /opt/spark/bin/spark-submit
       --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.0
@@ -71,7 +71,7 @@ services:
       --conf spark.hadoop.fs.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem
       --conf spark.hadoop.fs.AbstractFileSystem.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFS
       --conf spark.hadoop.google.cloud.auth.service.account.enable=true
-      --conf spark.hadoop.google.cloud.auth.service.account.json.keyfile=/opt/credentials/weather-pipeline-spark-key.json
+      --conf spark.hadoop.google.cloud.auth.service.account.json.keyfile=/opt/credentials/gcs-service-account-key.json
       /opt/spark_jobs/consume_events.py
 
   spark-transform:
@@ -84,7 +84,7 @@ services:
       - ./spark_jobs:/opt/spark_jobs
       - ./credentials:/opt/credentials:ro
     environment:
-      GCS_BUCKET: private-bucket-102
+      GCS_BUCKET: ${GCS_BUCKET}
       CUTOFF_TIMESTAMP: "2026-07-30T06:38:53"
     command: >
       /opt/spark/bin/spark-submit
@@ -92,7 +92,7 @@ services:
       --conf spark.hadoop.fs.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem
       --conf spark.hadoop.fs.AbstractFileSystem.gs.impl=com.google.cloud.hadoop.fs.gcs.GoogleHadoopFS
       --conf spark.hadoop.google.cloud.auth.service.account.enable=true
-      --conf spark.hadoop.google.cloud.auth.service.account.json.keyfile=/opt/credentials/weather-pipeline-spark-key.json
+      --conf spark.hadoop.google.cloud.auth.service.account.json.keyfile=/opt/credentials/gcs-service-account-key.json
       /opt/spark_jobs/transform_events.py
 
   kafka-ui:
