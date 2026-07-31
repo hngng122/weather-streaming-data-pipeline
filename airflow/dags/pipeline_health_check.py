@@ -15,6 +15,7 @@ from datetime import timedelta
 import pendulum
 from airflow import DAG
 from airflow.operators.bash import BashOperator
+from notify import notify_telegram_failure
 
 SCRIPT = "python /opt/airflow/scripts/check_pipeline_health.py --stage"
 
@@ -24,6 +25,7 @@ with DAG(
     start_date=pendulum.datetime(2026, 7, 30, tz="UTC"),
     catchup=False,
     tags=["weather-pipeline"],
+    default_args={"on_failure_callback": notify_telegram_failure},
 ) as dag:
     check_producers = BashOperator(task_id="check_producers", bash_command=f"{SCRIPT} producers")
     check_kafka = BashOperator(task_id="check_kafka", bash_command=f"{SCRIPT} kafka")
